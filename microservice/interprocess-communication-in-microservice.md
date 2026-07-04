@@ -128,6 +128,54 @@ There are 2 main way to implement service discovery:
 ### 3.1.3 implementing publish/subcribe
 - a service publish a message to a publish/subcribe channel, and multiple consumer service can read that message
 
-messaging and channel is a good way to design the asynchronous API, but need to choose messaging technology and determine how to implement the design.
+messaging and channel is a good way to design the asynchronous API, but need to choose messaging technology and determine how to implement the design. let see message broker
 
 ## 3.2 Using message broker
+
+- A message broker is an intermediary through which all messages flow
+- a sender send message to broker and broker delivers message to the consumer
+- benefit : 
+  - important benefit of using broker is sender does not need to know the location of consumer
+  - broker can buffer the message until consumer can process them
+- there are many message broker to choose:
+  - some opensource broker like
+    - apache kafka 
+    - rabbitMQ
+    - ActiveMQ
+  - there are also cloud base
+    - AWS kinesis
+    - AWS SQS
+- when select a message broker, can consider to some factor:
+  - message ordering
+  - supported language
+  - delivery guarantees 
+  - latency
+  - ....
+- each broker make different trade-off, a broker has very-slow latency but not preserve ordering and no guarantees the delivers message. a broker that guarantee delivery and preserve ordering can have higher latency.
+
+### 3.2.1 implement message channel using message broker
+
+let look at benefit 
+- loose coupling: sender only need to send message to broker and doesn't care about consumer location.
+- message buffering: message can be buffer in broker until consumers are available to consume the message
+- flexible communication: support all interaction style
+
+there are some downside of using message
+- potential bottle neck: There is a risk that the message broker could be a performance bottleneck. Fortunately, many modern message brokers are designed to be highly scalable
+- potential single point failer: the message broker should be highly available, otherwise the application reliability is impact. fortunately, modern broker can handle this
+- configuration a message broker is complex
+
+### 3.2.2 Competing receivers and message ordering
+
+- it's common requirement that to have multiple of instances of consumer to process message concurrently, or single instance of consumer use multiple threads to process message concurrently
+- challenge is that ensure the message is processed once in order
+- imagine that 3 instances of consumer reading message from a channel, and sender publishes order-created, order-update, order-cancelled sequentially, but somehow a instance of consumer read order-update before order-created, then the consumer will process the message in wrong order. this is a problem
+- a common solution used by modern message broker like Kafka, rabbitMQ is to use the concept of partition/sharding. there are 3 part of this solution
+  - a shard channel consists of more than one partition/shard, which behave like a channel
+  - sender specifies a partition/shard key in message header, broker uses the shard/partition key assign the message to a particular partition/shard (maybe hash the shard key to determine the partition/shard)
+  - broker groups together instances of consumer into a consumer group, and treats them as the same logical consumer, each shard/partition is assigned to single instance of consumer.
+- by that solution, for example a sender produce 3 events with same shard key, the broker will assign all 3 events to the same partition/shard, and that partition/shard is assigned to a single instance of consumer, then the consumer will process the 3 events in order. if there are more than one instance of consumer in the consumer group, the broker will assign other partition/shard to other instance of consumer, then all instances of consumer can process message concurrently, but each partition/shard is processed by a single instance of consumer.
+
+### 3.2.3 handling duplication messages
+
+- 
