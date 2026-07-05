@@ -178,4 +178,25 @@ there are some downside of using message
 
 ### 3.2.3 handling duplication messages
 
+- another challenge is duplication message when dealing with messaging, ideally broker should process messages once but its too costly, instead, most broker provide at-least-once delivery guarantee.
+
+- let say application working normally, then messages was delivered to consumer only once, but somehow consumer process message and update db, but application crash before consumer send acknowledgement (mean message was processed) to broker, then broker will redeliver the message to consumer, and consumer will process the message again, then the db will be updated twice. this is a problem
+
+- there are 2 solution to handle duplication message
+  - **idempotent message handler**
+  - **tracking message and discarding duplicates**
+
+- idempotent message handler
+  - if application logic is idempotent, then it duplication message is harmless. for example, cancel a already canceled-order is an idempotent operation. but normally, application logic is not idempotent.
+
+- tracking message and discarding duplicates
+  - a simple solution is to track the message that has been processed then discard the duplication.
+  - it records the messagesId in table as a part of transaction, if messageId already existed, the insert will fail and consumer discard the message.
+
+### 3.2.4 Transactional messaging
+
+- a sender normally produce messages as a part of a transaction. then both database update and sending message must happen in a transaction, otherwise, if the database update is successful but the message sending fails, then the consumer will never know about the change.
+
+- traditionally, the solution is to use a distributed transaction, which is complex and not scalable, that normally use 2-phase commit protocol, but this is not good in modern application, instead, a common solution is to use the **outbox pattern**, will check it in other chapter.
+
 - 
