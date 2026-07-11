@@ -198,5 +198,84 @@ there are some downside of using message
 - a sender normally produce messages as a part of a transaction. then both database update and sending message must happen in a transaction, otherwise, if the database update is successful but the message sending fails, then the consumer will never know about the change.
 
 - traditionally, the solution is to use a distributed transaction, which is complex and not scalable, that normally use 2-phase commit protocol, but this is not good in modern application, instead, a common solution is to use the **outbox pattern**, will check it in other chapter.
+## 3.3 Using asynchronous messaging to improve availability
 
-- 
+By choosing IPC communications, there are different trade-offs. One particular trade-off is availability. Let's see how synchronous and asynchronous communication impact availability.
+
+---
+
+### 3.3.1 Using synchronous communication reduces availability
+
+The nature of synchronous communication is request/response, which means a service needs to wait for a response from another service.
+
+**Example:**
+- If we have A → B → C, and B is down, then the transaction cannot complete. A will wait for B until timeout
+- When adding a new service D, response time will increase
+- REST is extremely popular for synchronous communication because HTTP protocol requires the request to wait for a response
+- This problem exists even when using request/response over asynchronous messaging, because it still needs to wait for a response from the message broker
+
+---
+
+### 3.3.2 Eliminating synchronous interaction
+
+#### Approach 1: Use Asynchronous Interaction Style
+
+Ideally, using asynchronous interactions for all communications allows services to:
+- Asynchronously exchange messages with other services
+- Get responses through message-channels
+- Ensure no participant is blocked
+
+However, services often have external APIs that use synchronous interactions (e.g., REST), which require immediate responses. In such cases, one way to improve availability is **data replication**.
+
+#### Approach 2: Replicate Data
+
+A service can maintain a replica of data from other services. This replica stays up-to-date by subscribing to events from other services that own the original data.
+
+**Benefits:**
+- A service can process without interacting with other services
+
+**Drawbacks:**
+- Can require replication of large amounts of data
+- Does not handle how a service updates data owned by other services
+
+One way to solve this is by delaying interaction with other services until after responding to the client.
+
+#### Approach 3: Finishing Processing After Returning Response
+
+A service can return a response to the client first, then interact with other services to update data in the background.
+
+**Implementation Steps:**
+1. Service handles request using local data
+2. Update the database and save message to outbox table
+3. Return response to client
+
+**Example Scenario: A → B → C**
+
+Instead of waiting for all validations:
+1. Service A gets the order and updates it to `PENDING`, then responds to client immediately
+2. Service A sends a message to B to validate if the order can be placed; B sends a validation response back to A
+3. Service A sends a message to C to validate if the order can be placed; C sends a validation response back to A
+4. Service A updates the order to `CONFIRMED` if both B and C validated the order
+
+**Benefits:**
+- Even if B or C is down, when they recover, the system can still process the order
+
+**Drawbacks:**
+- Response is returned before the order is validated
+- Must have a mechanism to let the client know if the order is confirmed or not
+- This adds complexity but can be considered in many situations
+
+---
+
+## Summary
+
+- **Microservice architecture is a distributed system**, so IPC plays a key role
+- **API evolution is essential** — A backward-compatible change is easiest to avoid impacting clients. When updating APIs, typically need to support both old and new versions until clients upgrade
+- **Many IPC technologies exist, each with different trade-offs** — Choosing between synchronous (REST) or asynchronous (messaging) is a key design decision. Services should ideally use asynchronous messaging patterns to increase availability
+- **When using synchronous communication**, services must have mechanisms to handle failures:
+  - Timeouts
+  - Limit the number of outstanding requests
+  - Circuit breaker pattern to avoid calling failing services
+- **Service discovery is essential** in a synchronous architecture to know the location of services in the network
+- **Message and channels model** is a good way to design a messaging-based architecture
+- **Atomic database updates with message sending** is a key challenge that must be handled properly
