@@ -82,3 +82,75 @@ With this approach:
 On the surface, SAGAs seem straightforward, but one challenging aspect is the lack of isolation between SAGAs. This creates a need for a rollback mechanism when an error occurs.
 
 This is where compensating transactions come in.
+
+#### SAGA uses compensating transactions to roll back changes
+
+A SAGA is a sequence of local transactions; if one local transaction fails, it is necessary to roll back commits in other services.
+
+However, each local transaction typically executes in a different database, so it is not possible to simply roll back like a traditional ACID transaction where a single DB undoes every change.
+
+Therefore, compensating transactions must be implemented to handle rollbacks in a SAGA.
+
+For example, consider a SAGA with five local transactions: A -> B -> C -> D -> E.
+If A, B, C, D are committed but E fails, then the corresponding compensating transactions D' -> C' -> B' -> A' must be executed to compensate for A, B, C, D. The compensating transactions can themselves execute as a SAGA, where D' triggers C', and so on.
+
+One important thing is that not all steps need a compensating transaction. For example, step B might only check that menu details are available (a read-only transaction) and does not update anything, so it does not need a compensating transaction.
+
+Example sequence:
+
+1. Order Service — Create an Order in APPROVAL_PENDING state
+2. Consumer Service — Verify that the consumer can place an order
+3. Kitchen Service — Validate order details and create a Ticket in CREATE_PENDING state
+4. Accounting Service — Authorize consumer's credit card, which fails
+5. Kitchen Service — Change the state of the Ticket to CREATE_REJECTED (compensates step 3)
+6. Order Service — Change the state of the Order to REJECTED (compensates step 1)
+
+Step 2 does not need compensation because it is a verification-only transaction.
+
+Therefore, a SAGA coordinator (coordination logic) is needed to execute forward and compensating transactions.
+
+---
+
+## 4.2 Coordinating SAGA
+
+Again, a SAGA is a sequence of local transactions. It processes and manages forward and compensating local transactions until the SAGA completes all steps.
+
+We need a structure to coordinate the SAGA logic. There are two different approaches:
+
+- **Choreography:** participants exchange messages and decide the next step themselves.
+- **Orchestration:** a centralized SAGA coordinator manages the flow. The orchestrator sends command messages to saga participants telling them which operation to perform.
+
+### Implementing the Create Order SAGA using Choreography
+
+Example (happy path):
+
+1. Order Service creates an Order in APPROVAL_PENDING state and publishes an OrderCreated event.
+2. Consumer Service consumes the OrderCreated event, verifies the consumer can place the order, and publishes a ConsumerVerified event.
+3. Kitchen Service consumes the OrderCreated event, validates the Order, creates a Ticket in CREATE_PENDING state, and publishes the TicketCreated event.
+4. Accounting Service consumes the OrderCreated event and creates a CreditCardAuthorization in PENDING state.
+5. Accounting Service consumes the TicketCreated and ConsumerVerified events, charges the consumer's credit card, and publishes a CreditCardAuthorized event.
+6. Kitchen Service consumes the CreditCardAuthorized event and changes the Ticket state to AWAITING_ACCEPTANCE.
+7. Order Service receives the CreditCardAuthorized event, changes the Order state to APPROVED, and publishes an OrderApproved event.
+
+The created order flow must handle cases where a participant publishes a reject event or fails.
+
+### Reliable event-based communication
+
+There are a couple of issues to consider:
+
+- Ensure that saving data to the DB and sending an event are coordinated — use transactional messaging (Outbox pattern).
+- Ensure that each event is received and used to update the participant's data — use a correlationId (for example, use orderId directly).
+
+### Benefits and drawbacks of choreography-based SAGA
+
+Choreography SAGA has several benefits:
+
+- Simplicity: a service publishes an event when performing a business operation (e.g., CRUD).
+- Loose coupling: saga participants publish events without knowing implementation details of other services.
+
+But it also has drawbacks:
+
+- Difficult to understand: choreography distributes the implementation of the SAGA among services; consequently, it can be hard for a developer to understand how a given SAGA works.
+- Risk of hidden coupling: each saga participant may need to subscribe to multiple events that affect them, which can create implicit coupling.
+
+Choreography can work for simple SAGAs, but given these drawbacks, orchestration is often preferable for more complex SAGAs.
