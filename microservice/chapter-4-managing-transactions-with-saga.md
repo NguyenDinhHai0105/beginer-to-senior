@@ -120,8 +120,9 @@ We need a structure to coordinate the SAGA logic. There are two different approa
 - **Choreography:** participants exchange messages and decide the next step themselves.
 - **Orchestration:** a centralized SAGA coordinator manages the flow. The orchestrator sends command messages to saga participants telling them which operation to perform.
 
-### Implementing the Create Order SAGA using Choreography
+### 4.2.1 Choreography-based sagas 
 
+Implementing the Create Order SAGA using Choreography
 Example (happy path):
 
 1. Order Service creates an Order in APPROVAL_PENDING state and publishes an OrderCreated event.
@@ -134,14 +135,14 @@ Example (happy path):
 
 The created order flow must handle cases where a participant publishes a reject event or fails.
 
-### Reliable event-based communication
+#### Reliable event-based communication
 
 There are a couple of issues to consider:
 
 - Ensure that saving data to the DB and sending an event are coordinated — use transactional messaging (Outbox pattern).
 - Ensure that each event is received and used to update the participant's data — use a correlationId (for example, use orderId directly).
 
-### Benefits and drawbacks of choreography-based SAGA
+#### Benefits and drawbacks of choreography-based SAGA
 
 Choreography SAGA has several benefits:
 
@@ -154,3 +155,47 @@ But it also has drawbacks:
 - Risk of hidden coupling: each saga participant may need to subscribe to multiple events that affect them, which can create implicit coupling.
 
 Choreography can work for simple SAGAs, but given these drawbacks, orchestration is often preferable for more complex SAGAs.
+
+### 4.2.2 Orchestration-based SAGAs
+
+Orchestration is another way to implement SAGAs by defining an orchestration class. This class is responsible for telling saga participants what to do.
+
+The orchestration communicates with participants using asynchronous messaging, instructing them what to execute. When the execution completes, participants reply to the orchestrator, which then processes the response and determines the next action.
+
+#### Modeling SAGA orchestrators as state machines
+
+A good way to model an orchestrator is as a state machine:
+
+A state machine consists of states and transitions between states:
+- **States:** e.g., PENDING_ORDER, CREATED_ORDER, REJECTED_ORDER
+- **Transitions:** e.g., PENDING_ORDER → CREATED_ORDER, PENDING_ORDER → REJECTED_ORDER
+
+Each transition can have an action, which for a SAGA is the invocation of a participant. Transitions between states are triggered by the completion of a local transaction in a participant.
+
+Example:
+- To transit from PENDING_ORDER → CREATED_ORDER, the SAGA calls the AuthorizeCard participant to perform payment. If payment succeeds, the participant replies to the orchestrator.
+
+The current state and the specific outcome of the local transaction determine the next state transition and what action (if any) to perform.
+
+#### SAGA orchestration and transactional messaging
+
+Because each local transaction must ensure that data is updated and an event is delivered, transactional messaging must be implemented. See the Outbox pattern for details.
+
+#### Benefits and drawbacks of orchestration
+
+**Benefits:**
+
+- **Simpler dependency:** the orchestrator invokes saga participants, but participants do not invoke the orchestrator. As a result, the orchestrator depends on the participants but not vice versa, and there are no cyclic dependencies.
+- **Loose coupling:** each service is invoked by the orchestrator, so services do not need to know about each other.
+- **Improved separation of concerns:** business logic is more clearly separated from sequencing logic.
+
+**Drawbacks:**
+
+- **Risk of centralizing too much business logic:** the orchestrator can become a "smart" orchestrator that tells "dumb" services what to do. However, you can avoid this problem by designing orchestrators that are solely responsible for sequencing and do not contain any other business logic.
+
+**Recommendation:** Use orchestration for all but the simplest SAGAs. Another significant challenge is the lack of isolation.
+
+---
+
+## 4.3 Handling the lack of isolation
+
