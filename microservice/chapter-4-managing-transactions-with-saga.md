@@ -199,3 +199,25 @@ Because each local transaction must ensure that data is updated and an event is 
 
 ## 4.3 Handling the lack of isolation
 
+#### Why isolation is lacking when applying SAGA pattern
+
+**Isolation in traditional ACID transactions:**
+
+In traditional ACID transactions, the isolation property ensures that the outcome of executing multiple concurrent transactions is the same as if they were executed in some serial order.
+
+For example, if transaction A and B arrive at the same time, the outcome of these two transactions must be the same as if A executed first, followed by B.
+
+**Example: Single phone in stock**
+
+- Transaction A starts purchasing it
+- Before A commits, B tries to buy the same phone
+- With isolation, B cannot act on changes uncommitted by A. B must wait until A commits. The final result is the same as if either A or B had executed first.
+
+#### Why SAGA lacks isolation
+
+As mentioned earlier, the nature of SAGA is a sequence of local transactions. Updates made by a local transaction A become immediately visible to other local transactions B when A commits.
+
+This behavior can cause two problems:
+
+- **Dirty writes:** other SAGAs can change data being accessed by an executing SAGA. For example, SAGA B can change data while SAGA A is updating that same data.
+- **Dirty reads:** other SAGAs can read data before the current SAGA completes, and consequently may be exposed to inconsistent data. For example, SAGA B can read stock = 0 even though SAGA A has not yet processed payment.
